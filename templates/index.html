@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Python Калькулятор на Flask</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 300px; text-align: center; }
+        input, select, button { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; font-size: 16px; }
+        button { background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background-color: #45a049; }
+        .result { font-size: 18px; font-weight: bold; color: #333; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Веб-калькулятор на Python</h2>
+        
+        <!-- Форма отправки данных на сервер методом POST -->
+        <form method="POST">
+            <input type="number" step="any" name="num1" placeholder="Первое число" required>
+            
+            <select name="operator">
+                <option value="+">+</option>
+                <option value="-">-</option>
+                <option value="*">*</option>
+                <option value="/">/</option>
+            </select>
+            
+            <input type="number" step="any" name="num2" placeholder=" Второе число" required>
+            
+            <button type="submit">Посчитать</button>
+        </form>
+
+        <!-- Если сервер вернул результат, выводим его -->
+        {% if result is not none %}
+            <div class="result">Результат: {{ result }}</div>
+        {% endif %}
+    </div>
+
+</body>
+</html>

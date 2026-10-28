@@ -1,0 +1,42 @@
+/* Настройки для всей страницы целиком */
+body {
+    font-family: Arial, sans-serif; /* Красивый шрифт */
+    background-color: #f0f2f5;       /* Светло-серый фон */
+    display: flex;                  /* Выравнивание по центру */
+    justify-content: center;
+    align-items: center;
+    height: 100vh;                  /* На всю высоту экрана */
+    margin: 0;
+}
+
+/* Карточка с контентом */
+.card {
+    background-color: white;        /* Белый фон карточки */
+    padding: 40px;                  /* Внутренние отступы */
+    border-radius: 12px;            /* Скругленные углы */
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1); /* Легкая тень */
+    text-align: center;             /* Текст по центру */
+}
+
+/* Заголовок */
+h1 {
+    color: #333333;
+    margin-bottom: 10px;
+}
+
+/* Кнопка */
+button {
+    background-color: #4CAF50;      /* Зеленый цвет кнопки */
+    color: white;                   /* Белый текст */
+    border: none;
+    padding: 12px 24px;
+    font-size: 16px;
+    border-radius: 6px;
+    cursor: pointer;                /* Курсор-рука при наведении */
+    transition: background 0.3s;    /* Плавный эффект */
+}
+
+/* Эффект при наведении мыши на кнопку */
+button:hover {
+    background-color: #45a049;      /* Темно-зеленый */
+}
