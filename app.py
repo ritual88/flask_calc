@@ -1,31 +1,18 @@
 from flask import Flask, render_template, request
-import sqlite3
+from supabase import create_client, Client
 
 app = Flask(__name__)
 
-# --- ФУНКЦИЯ ДЛЯ РАБОТЫ С БАЗОЙ ДАННЫХ ---
-def init_db():
-    """Создает таблицу для истории, если её еще нет"""
-    conn = sqlite3.connect('database.db') # Подключаемся к файлу базы данных (он создастся сам)
-    cursor = conn.cursor()
-    # Создаем таблицу history с колонками: id, num1, operator, num2, result
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            num1 REAL,
-            operator TEXT,
-            num2 REAL,
-            result TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# --- ПОДКЛЮЧЕНИЕ К ОБЛАКУ SUPABASE ---
+# Вставь сюда данные, которые ты скопировал из панели Supabase:
+SUPABASE_URL = "https://jxqhxosadlziboaxqmou.supabase.co"  # ТВОЙ URL
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4cWh4b3NhZGx6aWJvYXhxbW91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMyODAwMzUsImV4cCI6MjEwODg1NjAzNX0.H3VU5MZerTCvw19bQ3rUpPu5KhDV2wBZ_6nbPa04QbA"                       # ТВОЙ ANON КЛЮЧ
 
-# Запускаем создание базы при старте сервера
-init_db()
+# Создаем клиента для связи с базой
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# --- ГЛАВНАЯ СТРАНИЦА И ЛОГИКА КАЛЬКУЛЯТОРА ---
+# --- ГЛАВНАЯ СТРАНИЦА И ВЫЧИСЛЕНИЯ ---
 @app.route('/', methods=['GET', 'POST'])
 def calculator():
     result = None
@@ -36,7 +23,7 @@ def calculator():
             num2 = float(request.form.get('num2'))
             operator = request.form.get('operator')
             
-            # Считаем результат
+            # Вычисляем результат
             if operator == '+':
                 result = num1 + num2
             elif operator == '-':
@@ -45,35 +32,30 @@ def calculator():
                 result = num1 * num2
             elif operator == '/':
                 if num2 == 0:
-                    result = "Ошибка: На ноль делить нельзя!"
+                    result = "Ошибка: Деление на 0"
                 else:
                     result = num1 / num2
             
-            # --- СОХРАНЯЕМ В БАЗУ ДАННЫХ ---
-            # Сохраняем только если расчет прошел успешно (результат — число)
+            # --- СОХРАНЯЕМ ЗАПИСЬ В ОБЛАКО SUPABASE ---
             if isinstance(result, (int, float)):
-                conn = sqlite3.connect('database.db')
-                cursor = conn.cursor()
-                # Записываем вычисление в таблицу
-                cursor.execute(
-                    "INSERT INTO history (num1, operator, num2, result) VALUES (?, ?, ?, ?)",
-                    (num1, operator, num2, result)
-                )
-                conn.commit()
-                conn.close()
+                supabase.table('history').insert({
+                    'num1': num1,
+                    'operator': operator,
+                    'num2': num2,
+                    'result': str(result)
+                }).execute()
                 
         except ValueError:
-            result = "Ошибка: Введите корректные числа!"
-            
-    # --- ДОСТАЕМ ИСТОРИЮ ИЗ БАЗЫ ДАННЫХ ---
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-    # Берем последние 5 записей из таблицы истории
-    cursor.execute("SELECT num1, operator, num2, result FROM history ORDER BY id DESC LIMIT 5")
-    history = cursor.fetchall()
-    conn.close()
+            result = "Ошибка ввода!"
 
-    # Передаем и результат, и всю историю в HTML-шаблон
+    # --- ЗАГРУЖАЕМ ПОСЛЕДНИЕ ЗАПИСИ ИЗ ОБЛАКА ---
+    # Делаем запрос к таблице 'history', берем последние 5 записей
+    response = supabase.table('history').select('*').order('id', desc=True).limit(5).execute()
+    records = response.data
+
+    # Приводим данные к удобному формату для вывода в HTML
+    history = [[item['num1'], item['operator'], item['num2'], item['result']] for item in records]
+
     return render_template('index.html', result=result, history=history)
 
 
