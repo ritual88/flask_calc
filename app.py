@@ -58,6 +58,11 @@ def calculator():
 
     return render_template('index.html', result=result, history=history)
 
+import os
 
+# --- ЗАПУСК СЕРВЕРА ДЛЯ ОБЛАКА И ЛОКАЛКИ ---
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Получаем порт от Render (если он есть), иначе используем 5000 для локального ПК
+    port = int(os.environ.get("PORT", 5000))
+    # Запускаем сервер на 0.0.0.0, чтобы облако увидело порт
+    app.run(host='0.0.0.0', port=port)
