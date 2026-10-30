@@ -2,55 +2,64 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Калькулятор с Базой Данных</title>
-    <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 350px; text-align: center; }
-        input, select, button { width: 100%; padding: 10px; margin: 8px 0; box-sizing: border-box; font-size: 16px; }
-        button { background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        button:hover { background-color: #45a049; }
-        .result { font-size: 18px; font-weight: bold; color: #333; margin-top: 10px; }
-        .history { margin-top: 20px; text-align: left; border-top: 1px solid #ddd; padding-top: 10px; }
-        .history h4 { margin: 0 0 5px 0; color: #555; font-size: 14px; }
-        .history ul { padding-left: 20px; margin: 0; font-size: 14px; color: #666; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Барсучий Калькулятор 🦡</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <body>
-    <!-- Наш новый заголовок -->
-    <h1 style="color: #ff6b6b; text-align: center; margin-top: 20px;">привет Барсук!!!</h1>
 
-    <div class="card">
-        <!-- Здесь идет остальной код карточки калькулятора -->
+    <h1 class="header-title">привет Барсук, как тебе мой сайтец?</h1>
 
-
-    <div class="card">
-        <h2>Калькулятор + База Данных</h2>
+    <div class="glass-card">
+        <div class="card-header">
+            <h2>⚡ Облачный Калькулятор</h2>
+            <p>Python Flask + Supabase</p>
+        </div>
         
         <form method="POST">
-            <input type="number" step="any" name="num1" placeholder="Первое число" required>
-            <select name="operator">
-                <option value="+">+</option>
-                <option value="-">-</option>
-                <option value="*">*</option>
-                <option value="/">/</option>
-            </select>
-            <input type="number" step="any" name="num2" placeholder="Второе число" required>
-            <button type="submit">Посчитать</button>
+            <div class="input-group">
+                <label>Первое число</label>
+                <input type="number" step="any" name="num1" placeholder="Введите число..." required>
+            </div>
+            
+            <div class="input-group">
+                <label>Операция</label>
+                <select name="operator">
+                    <option value="+">Сложение (+)</option>
+                    <option value="-">Вычитание (-)</option>
+                    <option value="*">Умножение (×)</option>
+                    <option value="/">Деление (÷)</option>
+                </select>
+            </div>
+            
+            <div class="input-group">
+                <label>Второе число</label>
+                <input type="number" step="any" name="num2" placeholder="Введите число..." required>
+            </div>
+            
+            <button type="submit">Посчитать результат</button>
         </form>
 
         {% if result is not none %}
-            <div class="result">Результат: {{ result }}</div>
+            <div class="result-box">
+                <div class="result-label">Результат</div>
+                <div class="result-value">{{ result }}</div>
+            </div>
         {% endif %}
 
-        <!-- --- БЛОК ИСТОРИИ ИЗ БАЗЫ ДАННЫХ --- -->
         {% if history %}
-            <div class="history">
-                <h4>История последних вычислений:</h4>
-                <ul>
-                    <!-- Цикл по записям из базы данных -->
+            <div class="history-section">
+                <div class="history-title">
+                    <span>История расчетов</span>
+                    <span class="history-badge">Live Supabase</span>
+                </div>
+                <ul class="history-list">
                     {% for item in history %}
-                        <li>{{ item[0] }} {{ item[1] }} {{ item[2] }} = {{ item[3] }}</li>
+                        <li class="history-item">
+                            <span>{{ item[0] }} {{ item[1] }} {{ item[2] }}</span>
+                            <span class="calc-res">= {{ item[3] }}</span>
+                        </li>
                     {% endfor %}
                 </ul>
             </div>
@@ -59,3 +68,4 @@
 
 </body>
 </html>
+
