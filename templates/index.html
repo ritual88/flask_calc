@@ -3,69 +3,95 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Барсучий Калькулятор 🦡</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <meta name="description" content="Познакомьтесь с Барсуком — человеком, который умеет веселиться и делиться хорошим настроением.">
+    <title>Барсук — мастер хорошего настроения</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
 </head>
 <body>
+    <header class="site-header">
+        <a class="brand" href="#home" aria-label="Барсук — на главную">БАРСУК<span>.</span></a>
 
-    <h1 class="header-title">привет Барсук, как тебе мой сайтец?</h1>
+        <nav class="main-nav" aria-label="Главная навигация">
+            <a href="#about">Обо мне</a>
+            <a href="#moments">Моменты</a>
+            <a href="#contacts">Контакты</a>
+        </nav>
 
-    <div class="glass-card">
-        <div class="card-header">
-            <h2>⚡ Облачный Калькулятор</h2>
-            <p>Python Flask + Supabase</p>
-        </div>
-        
-        <form method="POST">
-            <div class="input-group">
-                <label>Первое число</label>
-                <input type="number" step="any" name="num1" placeholder="Введите число..." required>
-            </div>
-            
-            <div class="input-group">
-                <label>Операция</label>
-                <select name="operator">
-                    <option value="+">Сложение (+)</option>
-                    <option value="-">Вычитание (-)</option>
-                    <option value="*">Умножение (×)</option>
-                    <option value="/">Деление (÷)</option>
-                </select>
-            </div>
-            
-            <div class="input-group">
-                <label>Второе число</label>
-                <input type="number" step="any" name="num2" placeholder="Введите число..." required>
-            </div>
-            
-            <button type="submit">Посчитать результат</button>
-        </form>
+        <a class="header-contact" href="#contacts">Связаться</a>
+    </header>
 
-        {% if result is not none %}
-            <div class="result-box">
-                <div class="result-label">Результат</div>
-                <div class="result-value">{{ result }}</div>
-            </div>
-        {% endif %}
-
-        {% if history %}
-            <div class="history-section">
-                <div class="history-title">
-                    <span>История расчетов</span>
-                    <span class="history-badge">Live Supabase</span>
+    <main>
+        <section class="hero" id="home" aria-labelledby="hero-title">
+            <canvas class="wave-canvas" aria-hidden="true"></canvas>
+            <div class="hero-copy">
+                <p class="eyebrow">Знакомьтесь, это Барсук</p>
+                <h1 id="hero-title">Привет!<br>Я Барсук —<br><span>и я люблю веселиться.</span></h1>
+                <p class="hero-intro">Здесь немного обо мне, моих забавных моментах и о том, как со мной связаться.</p>
+                <div class="hero-actions">
+                    <a class="button button-primary" href="tel:+71488">Позвонить</a>
+                    <a class="button button-secondary" href="mailto:superbarsuk@gmail.com">Написать</a>
                 </div>
-                <ul class="history-list">
-                    {% for item in history %}
-                        <li class="history-item">
-                            <span>{{ item[0] }} {{ item[1] }} {{ item[2] }}</span>
-                            <span class="calc-res">= {{ item[3] }}</span>
-                        </li>
-                    {% endfor %}
-                </ul>
             </div>
-        {% endif %}
-    </div>
 
+            <figure class="hero-photo">
+                <img
+                    src="{{ url_for('static', filename='images/barsuk-portrait.jpg') }}"
+                    alt="Портрет Барсука"
+                    fetchpriority="high"
+                >
+                <figcaption>Главный по хорошему настроению</figcaption>
+            </figure>
+        </section>
+
+        <section class="about section" id="about" aria-labelledby="about-title">
+            <div class="section-heading">
+                <p class="eyebrow">Немного обо мне</p>
+                <h2 id="about-title">Моё главное дело — <span>веселиться.</span></h2>
+            </div>
+            <p class="about-text">Люблю интересные моменты и поводы улыбнуться. Заглядывай — здесь всегда найдётся место для хорошего настроения.</p>
+        </section>
+
+        <section class="moments section" id="moments" aria-labelledby="moments-title">
+            <canvas class="wave-canvas" aria-hidden="true"></canvas>
+            <div class="section-heading">
+                <p class="eyebrow">Жизнь в кадре</p>
+                <h2 id="moments-title">Мои моменты</h2>
+            </div>
+            <div class="moments-grid">
+                <figure class="moment-card">
+                    <img
+                        src="{{ url_for('static', filename='images/barsuk-adventure.jpg') }}"
+                        alt="Барсук отдыхает на бревне"
+                        loading="lazy"
+                    >
+                    <figcaption>Время для приключений</figcaption>
+                </figure>
+                <figure class="moment-card">
+                    <img
+                        src="{{ url_for('static', filename='images/barsuk-home.jpg') }}"
+                        alt="Барсук выглядывает из уютного домика"
+                        loading="lazy"
+                    >
+                    <figcaption>Уютная пауза</figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section class="contacts section" id="contacts" aria-labelledby="contacts-title">
+            <p class="eyebrow">Будем на связи</p>
+            <h2 id="contacts-title">Есть повод пообщаться?</h2>
+            <p>Звони или пиши — буду рад!</p>
+            <div class="contact-actions">
+                <a class="button button-primary" href="tel:+71488">Позвонить: +71488</a>
+                <a class="button button-secondary" href="mailto:superbarsuk@gmail.com">superbarsuk@gmail.com</a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <a class="brand" href="#home">БАРСУК<span>.</span></a>
+        <p>Сделано с хорошим настроением.</p>
+    </footer>
 </body>
 </html>
-
