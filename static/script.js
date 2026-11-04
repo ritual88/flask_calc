@@ -1,5 +1,24 @@
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+// Сохраняем часовой пояс браузера, чтобы владелец не перепутал время клиента.
+const bookingTimeZone = document.querySelector("#booking-time-zone");
+if (bookingTimeZone instanceof HTMLInputElement) {
+    bookingTimeZone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+}
+const bookingTimeInput = document.querySelector("#booking-time");
+const bookingTimeZoneOffset = document.querySelector("#booking-time-zone-offset");
+if (bookingTimeInput instanceof HTMLInputElement && bookingTimeZoneOffset instanceof HTMLInputElement) {
+    // Считаем смещение именно для выбранной даты, чтобы учесть переход на летнее время.
+    const updateTimeZoneOffset = () => {
+        const selectedTime = new Date(bookingTimeInput.value);
+        if (!Number.isNaN(selectedTime.getTime())) {
+            bookingTimeZoneOffset.value = String(selectedTime.getTimezoneOffset());
+        }
+    };
+    bookingTimeInput.addEventListener("change", updateTimeZoneOffset);
+    bookingTimeInput.form?.addEventListener("submit", updateTimeZoneOffset);
+}
+
 function setupWaveAnimation(section) {
     const canvas = section.querySelector(".wave-canvas");
 

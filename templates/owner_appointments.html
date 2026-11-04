@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Записи на встречу — Барсук</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="owner-page">
+        <header class="owner-heading">
+            <div>
+                <a class="brand" href="{{ url_for('home') }}">БАРСУК<span>.</span></a>
+                <p class="eyebrow">Личный кабинет</p>
+                <h1>Заявки на встречу</h1>
+            </div>
+            <form action="{{ url_for('owner_logout') }}" method="post">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button class="button button-secondary" type="submit">Выйти</button>
+            </form>
+        </header>
+
+        {% include "_flashes.html" %}
+
+        {% if appointments %}
+            <ol class="appointment-list">
+                {% for appointment in appointments %}
+                    <li class="appointment-item">
+                        <div class="appointment-topline">
+                            <h2>{{ appointment.name }}</h2>
+                            <span class="appointment-status">
+                                {% if appointment.status == "pending" %}Ожидает подтверждения{% else %}{{ appointment.status }}{% endif %}
+                            </span>
+                        </div>
+                        <p><strong>Телефон:</strong> <a href="tel:{{ appointment.phone }}">{{ appointment.phone }}</a></p>
+                        <p><strong>Желаемое время:</strong> {{ appointment.requested_at }} ({{ appointment.time_zone }}, UTC{{ "%+d"|format(appointment.time_zone_offset // 60) }}:{{ "%02d"|format(appointment.time_zone_offset|abs % 60) }})</p>
+                        {% if appointment.note %}
+                            <p><strong>Комментарий:</strong> {{ appointment.note }}</p>
+                        {% endif %}
+                        <p class="appointment-created">Заявка №{{ appointment.id }}</p>
+                    </li>
+                {% endfor %}
+            </ol>
+        {% else %}
+            <p class="empty-appointments">Пока заявок нет.</p>
+        {% endif %}
+    </main>
+</body>
+</html>

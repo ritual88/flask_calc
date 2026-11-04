@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход владельца — Барсук</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="owner-page">
+        <a class="brand" href="{{ url_for('home') }}">БАРСУК<span>.</span></a>
+        <section class="owner-panel" aria-labelledby="owner-login-title">
+            <p class="eyebrow">Только для владельца</p>
+            <h1 id="owner-login-title">Вход в записи</h1>
+            {% include "_flashes.html" %}
+            <form class="booking-form" action="{{ url_for('owner_login') }}" method="post">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <label for="owner-password">Пароль владельца</label>
+                <input id="owner-password" name="password" type="password" autocomplete="current-password" required>
+                <button class="button button-primary" type="submit">Войти</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

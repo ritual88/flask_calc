@@ -15,6 +15,7 @@
         <nav class="main-nav" aria-label="Главная навигация">
             <a href="#about">Обо мне</a>
             <a href="#moments">Моменты</a>
+            <a href="#booking">Записаться</a>
             <a href="#contacts">Контакты</a>
         </nav>
 
@@ -78,6 +79,49 @@
             </div>
         </section>
 
+        <section class="booking section" id="booking" aria-labelledby="booking-title">
+            <p class="eyebrow">Встреча с Барсуком</p>
+            <h2 id="booking-title">Предложи удобное время</h2>
+            <p class="booking-intro">Это заявка, а не мгновенное бронирование: Барсук свяжется с тобой и подтвердит встречу.</p>
+
+            {% include "_flashes.html" %}
+
+            <form class="booking-form" action="{{ url_for('create_booking') }}" method="post">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+                <div class="booking-fields">
+                    <div class="form-field">
+                        <label for="booking-name">Как тебя зовут?</label>
+                        <input id="booking-name" name="name" type="text" minlength="2" maxlength="100" autocomplete="name" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="booking-phone">Телефон для связи</label>
+                        <input id="booking-phone" name="phone" type="tel" maxlength="25" autocomplete="tel" placeholder="+7 900 123-45-67" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="booking-time">Желаемые дата и время</label>
+                        <input id="booking-time" name="requested_at" type="datetime-local" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="booking-note">Комментарий <span>(необязательно)</span></label>
+                        <textarea id="booking-note" name="note" rows="4" maxlength="1000" placeholder="Например, что важно учесть"></textarea>
+                    </div>
+                </div>
+
+                <input id="booking-time-zone" name="time_zone" type="hidden" value="">
+                <input id="booking-time-zone-offset" name="time_zone_offset" type="hidden" value="">
+                <label class="consent-label" for="booking-consent">
+                    <input id="booking-consent" name="consent" type="checkbox" value="yes" required>
+                    <span>Согласен, что данные будут использоваться для связи по поводу встречи.</span>
+                </label>
+
+                <button class="button button-primary" type="submit">Отправить заявку</button>
+            </form>
+        </section>
+
         <section class="contacts section" id="contacts" aria-labelledby="contacts-title">
             <p class="eyebrow">Будем на связи</p>
             <h2 id="contacts-title">Есть повод пообщаться?</h2>
@@ -92,6 +136,7 @@
     <footer class="site-footer">
         <a class="brand" href="#home">БАРСУК<span>.</span></a>
         <p>Сделано с хорошим настроением.</p>
+        <a class="owner-link" href="{{ url_for('owner_login') }}">Вход владельца</a>
     </footer>
 </body>
 </html>
