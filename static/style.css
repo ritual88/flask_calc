@@ -11,6 +11,18 @@
     --content-width: 1160px;
 }
 
+.form-field select:disabled {
+    color: var(--muted);
+    cursor: wait;
+}
+
+.field-message {
+    min-height: 24px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -218,6 +230,14 @@ main,
     color: #061426;
 }
 
+.button-danger {
+    border-color: rgba(255, 143, 143, 0.48);
+    background: rgba(255, 143, 143, 0.1);
+    color: #ffc1c1;
+    cursor: pointer;
+    font-family: inherit;
+}
+
 .button-primary:hover {
     background: #75b7ed;
 }
@@ -386,6 +406,7 @@ main,
 
 .form-field input,
 .form-field textarea,
+.form-field select,
 .owner-panel input[type="password"] {
     width: 100%;
     min-height: 48px;
@@ -404,6 +425,7 @@ main,
 
 .form-field input:focus-visible,
 .form-field textarea:focus-visible,
+.form-field select:focus-visible,
 .owner-panel input[type="password"]:focus-visible,
 .consent-label input:focus-visible {
     outline: 2px solid var(--blue-300);
@@ -579,6 +601,34 @@ main,
 
 .appointment-created {
     margin-top: 16px !important;
+}
+
+.appointment-email-status {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.appointment-email-status p {
+    margin-top: 4px;
+}
+
+.appointment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.appointment-actions form {
+    margin: 0;
+}
+
+.appointment-actions .button {
+    min-height: 42px;
+    padding: 9px 16px;
+    cursor: pointer;
+    font-family: inherit;
 }
 
 @media (max-width: 800px) {

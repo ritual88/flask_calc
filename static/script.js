@@ -1,22 +1,76 @@
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-// Сохраняем часовой пояс браузера, чтобы владелец не перепутал время клиента.
-const bookingTimeZone = document.querySelector("#booking-time-zone");
-if (bookingTimeZone instanceof HTMLInputElement) {
-    bookingTimeZone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-}
-const bookingTimeInput = document.querySelector("#booking-time");
-const bookingTimeZoneOffset = document.querySelector("#booking-time-zone-offset");
-if (bookingTimeInput instanceof HTMLInputElement && bookingTimeZoneOffset instanceof HTMLInputElement) {
-    // Считаем смещение именно для выбранной даты, чтобы учесть переход на летнее время.
-    const updateTimeZoneOffset = () => {
-        const selectedTime = new Date(bookingTimeInput.value);
-        if (!Number.isNaN(selectedTime.getTime())) {
-            bookingTimeZoneOffset.value = String(selectedTime.getTimezoneOffset());
+// Сервер проверяет занятость повторно, а база закрывает гонку двух одновременных заявок.
+const bookingForm = document.querySelector(".booking-form[data-availability-url]");
+const bookingDateInput = document.querySelector("#booking-date");
+const bookingSlotSelect = document.querySelector("#booking-slot");
+const availabilityMessage = document.querySelector("#booking-availability-message");
+
+if (
+    bookingForm instanceof HTMLFormElement &&
+    bookingDateInput instanceof HTMLInputElement &&
+    bookingSlotSelect instanceof HTMLSelectElement &&
+    availabilityMessage instanceof HTMLElement
+) {
+    let availabilityRequest = 0;
+
+    async function loadAvailableSlots() {
+        const selectedDate = bookingDateInput.value;
+        const requestNumber = ++availabilityRequest;
+        bookingSlotSelect.disabled = true;
+        bookingSlotSelect.replaceChildren(new Option("Загружаем свободное время…", ""));
+
+        if (!selectedDate) {
+            availabilityMessage.textContent = "Сначала выбери дату встречи.";
+            bookingSlotSelect.replaceChildren(new Option("Сначала выбери дату", ""));
+            return;
         }
-    };
-    bookingTimeInput.addEventListener("change", updateTimeZoneOffset);
-    bookingTimeInput.form?.addEventListener("submit", updateTimeZoneOffset);
+
+        availabilityMessage.textContent = "Проверяем расписание…";
+        try {
+            const url = new URL(bookingForm.dataset.availabilityUrl, window.location.origin);
+            url.searchParams.set("date", selectedDate);
+            const response = await fetch(url, { headers: { Accept: "application/json" } });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || "Не удалось загрузить свободное время.");
+            }
+            if (requestNumber !== availabilityRequest) {
+                return;
+            }
+            if (!Array.isArray(result.slots)) {
+                throw new Error("Сервер вернул некорректный список времени.");
+            }
+
+            bookingSlotSelect.replaceChildren(new Option("Выбери время", ""));
+            for (const slot of result.slots) {
+                if (typeof slot.value !== "string" || typeof slot.label !== "string") {
+                    throw new Error("Сервер вернул некорректный список времени.");
+                }
+                bookingSlotSelect.add(new Option(slot.label, slot.value));
+            }
+            bookingSlotSelect.disabled = false;
+            availabilityMessage.textContent = result.slots.length
+                ? "Встреча длится 60 минут. Время указано по Москве."
+                : "На эту дату свободного времени нет. Выбери другой будний день.";
+        } catch (error) {
+            if (requestNumber !== availabilityRequest) {
+                return;
+            }
+            console.error("Could not load appointment availability.", error);
+            bookingSlotSelect.replaceChildren(new Option("Не удалось загрузить время", ""));
+            availabilityMessage.textContent = "Не удалось загрузить расписание. Попробуй выбрать дату ещё раз.";
+        }
+    }
+
+    bookingDateInput.addEventListener("change", loadAvailableSlots);
+    bookingForm.addEventListener("submit", (event) => {
+        if (bookingSlotSelect.disabled || !bookingSlotSelect.value) {
+            event.preventDefault();
+            availabilityMessage.textContent = "Сначала выбери дату и свободное время.";
+            bookingDateInput.focus();
+        }
+    });
 }
 
 function setupWaveAnimation(section) {

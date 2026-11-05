@@ -86,7 +86,12 @@
 
             {% include "_flashes.html" %}
 
-            <form class="booking-form" action="{{ url_for('create_booking') }}" method="post">
+            <form
+                class="booking-form"
+                action="{{ url_for('create_booking') }}"
+                method="post"
+                data-availability-url="{{ url_for('availability') }}"
+            >
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
                 <div class="booking-fields">
@@ -101,8 +106,30 @@
                     </div>
 
                     <div class="form-field">
-                        <label for="booking-time">Желаемые дата и время</label>
-                        <input id="booking-time" name="requested_at" type="datetime-local" required>
+                        <label for="booking-email">Электронная почта</label>
+                        <input id="booking-email" name="email" type="email" maxlength="254" autocomplete="email" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="booking-date">Дата встречи</label>
+                        <input
+                            id="booking-date"
+                            name="booking_date"
+                            type="date"
+                            min="{{ booking_min_date }}"
+                            max="{{ booking_max_date }}"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-field">
+                        <label for="booking-slot">Свободное время (Москва)</label>
+                        <select id="booking-slot" name="starts_at" required disabled>
+                            <option value="">Сначала выбери дату</option>
+                        </select>
+                        <p id="booking-availability-message" class="field-message" role="status" aria-live="polite">
+                            Встречи проходят по будням с 10:00 до 18:00.
+                        </p>
                     </div>
 
                     <div class="form-field">
@@ -111,8 +138,6 @@
                     </div>
                 </div>
 
-                <input id="booking-time-zone" name="time_zone" type="hidden" value="">
-                <input id="booking-time-zone-offset" name="time_zone_offset" type="hidden" value="">
                 <label class="consent-label" for="booking-consent">
                     <input id="booking-consent" name="consent" type="checkbox" value="yes" required>
                     <span>Согласен, что данные будут использоваться для связи по поводу встречи.</span>

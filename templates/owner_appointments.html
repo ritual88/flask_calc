@@ -29,14 +29,53 @@
                         <div class="appointment-topline">
                             <h2>{{ appointment.name }}</h2>
                             <span class="appointment-status">
-                                {% if appointment.status == "pending" %}Ожидает подтверждения{% else %}{{ appointment.status }}{% endif %}
+                                {{ appointment.status_label }}
                             </span>
                         </div>
                         <p><strong>Телефон:</strong> <a href="tel:{{ appointment.phone }}">{{ appointment.phone }}</a></p>
-                        <p><strong>Желаемое время:</strong> {{ appointment.requested_at }} ({{ appointment.time_zone }}, UTC{{ "%+d"|format(appointment.time_zone_offset // 60) }}:{{ "%02d"|format(appointment.time_zone_offset|abs % 60) }})</p>
+                        <p><strong>Почта:</strong>
+                            {% if appointment.email %}
+                                <a href="mailto:{{ appointment.email }}">{{ appointment.email }}</a>
+                            {% else %}
+                                не указана в старой заявке
+                            {% endif %}
+                        </p>
+                        <p><strong>Время:</strong> {{ appointment.starts_at_display }}–{{ appointment.ends_at_display }} (Europe/Moscow)</p>
                         {% if appointment.note %}
                             <p><strong>Комментарий:</strong> {{ appointment.note }}</p>
                         {% endif %}
+                        <div class="appointment-email-status">
+                            <p><strong>Письмо клиенту:</strong> {{ appointment.client_email_status_label }}</p>
+                            <p><strong>Уведомление владельцу:</strong> {{ appointment.owner_email_status_label }}</p>
+                        </div>
+                        <div class="appointment-actions">
+                            {% if appointment.status == "pending" %}
+                                <form action="{{ url_for('confirm_appointment', appointment_id=appointment.id) }}" method="post">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button button-primary" type="submit">Подтвердить</button>
+                                </form>
+                            {% endif %}
+                            {% if appointment.status in ["pending", "confirmed"] %}
+                                <form action="{{ url_for('cancel_appointment', appointment_id=appointment.id) }}" method="post">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button button-secondary" type="submit">Отменить</button>
+                                </form>
+                            {% endif %}
+                            {% if appointment.client_email_status in ["failed", "pending"] or appointment.owner_email_status in ["failed", "pending"] %}
+                                <form action="{{ url_for('retry_appointment_email', appointment_id=appointment.id) }}" method="post">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button button-secondary" type="submit">Повторить отправку писем</button>
+                                </form>
+                            {% endif %}
+                            <form
+                                action="{{ url_for('delete_appointment', appointment_id=appointment.id) }}"
+                                method="post"
+                                onsubmit="return confirm('Удалить запись без возможности восстановления?');"
+                            >
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                                <button class="button button-danger" type="submit">Удалить навсегда</button>
+                            </form>
+                        </div>
                         <p class="appointment-created">Заявка №{{ appointment.id }}</p>
                     </li>
                 {% endfor %}

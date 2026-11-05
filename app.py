@@ -4,14 +4,24 @@ import os
 import re
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
+
+# Все слоты показываются по местному времени Барсука.
+BUSINESS_TIME_ZONE = ZoneInfo("Europe/Moscow")
+BUSINESS_START_HOUR = 10
+BUSINESS_END_HOUR = 18
+MEETING_MINUTES = 60
+SLOT_STEP_MINUTES = 30
+BOOKING_DAYS_AHEAD = 30
+ACTIVE_STATUSES = ("pending", "confirmed")
 
 # Постоянный ключ подписи сохраняет сессию владельца после перезапуска.
 secret_key = os.environ.get("FLASK_SECRET_KEY")
@@ -40,6 +50,14 @@ login_failures = {}
 
 class BookingServiceError(Exception):
     """Ошибка возникает, когда сервер не может обратиться к закрытому API записей."""
+
+
+class SlotUnavailableError(BookingServiceError):
+    """Запрошенное время уже занято другой заявкой."""
+
+
+class EmailDeliveryError(Exception):
+    """Почтовый сервис не принял уведомление."""
 
 
 def csrf_token():
@@ -93,6 +111,8 @@ def supabase_request(method, path, payload=None):
         with urlopen(api_request, timeout=10) as response:
             response_body = response.read()
     except HTTPError as error:
+        if error.code == 409:
+            raise SlotUnavailableError("The requested appointment time is already reserved.") from error
         # Записываем только код ошибки: ответ базы может содержать личные данные.
         app.logger.error("Supabase request failed with HTTP status %s.", error.code)
         raise BookingServiceError("Supabase rejected the request.") from error
@@ -100,10 +120,256 @@ def supabase_request(method, path, payload=None):
         # Сообщаем о проблеме связи, не записывая пароль или данные клиента в журнал.
         app.logger.error("Could not reach Supabase: %s", error.reason)
         raise BookingServiceError("Supabase is unreachable.") from error
+    except TimeoutError as error:
+        app.logger.error("Supabase request timed out.")
+        raise BookingServiceError("Supabase request timed out.") from error
 
     if not response_body:
         return []
-    return json.loads(response_body)
+    try:
+        return json.loads(response_body)
+    except ValueError as error:
+        app.logger.error("Supabase returned an invalid JSON response.")
+        raise BookingServiceError("Supabase returned an invalid response.") from error
+
+
+def send_email(recipient, subject, text):
+    # В тестовом режиме письма уходят только на специальный адрес Resend.
+    test_mode_setting = os.environ.get("EMAIL_TEST_MODE", "true").strip().lower()
+    if test_mode_setting not in ("true", "false"):
+        raise EmailDeliveryError("EMAIL_TEST_MODE must be true or false.")
+    test_mode = test_mode_setting == "true"
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    sender = os.environ.get("EMAIL_FROM", "onboarding@resend.dev" if test_mode else "")
+    actual_recipient = "delivered@resend.dev" if test_mode else recipient
+    if not api_key or not sender or not actual_recipient:
+        raise EmailDeliveryError("Resend email settings are incomplete.")
+
+    # Отправляем только текст письма, не вставляя введённые данные в HTML.
+    body = json.dumps(
+        {
+            "from": sender,
+            "to": [actual_recipient],
+            "subject": f"[TEST] {subject}" if test_mode else subject,
+            "text": text,
+        }
+    ).encode("utf-8")
+    email_request = Request(
+        "https://api.resend.com/emails",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(email_request, timeout=10) as response:
+            result = json.loads(response.read())
+    except HTTPError as error:
+        # Не записываем в лог содержимое письма или почтовый ключ.
+        app.logger.error("Resend rejected an email with HTTP status %s.", error.code)
+        raise EmailDeliveryError("Resend rejected the email.") from error
+    except URLError as error:
+        app.logger.error("Could not reach Resend: %s", error.reason)
+        raise EmailDeliveryError("Resend is unreachable.") from error
+    except TimeoutError as error:
+        app.logger.error("Resend request timed out.")
+        raise EmailDeliveryError("Resend request timed out.") from error
+    except ValueError as error:
+        app.logger.error("Resend returned an invalid JSON response.")
+        raise EmailDeliveryError("Resend returned an invalid response.") from error
+    if not result.get("id"):
+        raise EmailDeliveryError("Resend returned no email ID.")
+    return result["id"]
+
+
+def supabase_query(path, params):
+    # Кодируем фильтры API, чтобы даты и скобки не ломали адрес запроса.
+    return f"{path}?{urlencode(params, quote_via=quote, safe='(),')}"
+
+
+def local_date_window(day):
+    # Начало и конец рабочего дня переводим в UTC для точного поиска пересечений.
+    start = datetime.combine(day, wall_time(BUSINESS_START_HOUR), BUSINESS_TIME_ZONE)
+    end = datetime.combine(day, wall_time(BUSINESS_END_HOUR), BUSINESS_TIME_ZONE)
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+
+
+def available_slots(day, now=None):
+    # Строим расписание с шагом 30 минут и убираем пересечения с активными заявками.
+    local_now = now or datetime.now(BUSINESS_TIME_ZONE)
+    today = local_now.date()
+    if day < today or day > today + timedelta(days=BOOKING_DAYS_AHEAD) or day.weekday() >= 5:
+        return []
+
+    window_start, window_end = local_date_window(day)
+    query = supabase_query(
+        "appointments",
+        {
+            "select": "starts_at,ends_at",
+            "status": "in.(pending,confirmed)",
+            "starts_at": f"lt.{window_end.isoformat()}",
+            "ends_at": f"gt.{window_start.isoformat()}",
+        },
+    )
+    busy_rows = supabase_request("GET", query)
+    busy_ranges = [
+        (
+            datetime.fromisoformat(row["starts_at"].replace("Z", "+00:00")),
+            datetime.fromisoformat(row["ends_at"].replace("Z", "+00:00")),
+        )
+        for row in busy_rows
+    ]
+
+    slots = []
+    first_minute = BUSINESS_START_HOUR * 60
+    last_minute = BUSINESS_END_HOUR * 60 - MEETING_MINUTES
+    for minute_of_day in range(first_minute, last_minute + 1, SLOT_STEP_MINUTES):
+        start_local = datetime.combine(
+            day,
+            wall_time(minute_of_day // 60, minute_of_day % 60),
+            BUSINESS_TIME_ZONE,
+        )
+        start_utc = start_local.astimezone(timezone.utc)
+        end_utc = start_utc + timedelta(minutes=MEETING_MINUTES)
+        if start_local <= local_now:
+            continue
+        if any(start_utc < busy_end and end_utc > busy_start for busy_start, busy_end in busy_ranges):
+            continue
+        slots.append(
+            {
+                "value": start_utc.isoformat(),
+                "label": start_local.strftime("%H:%M"),
+            }
+        )
+    return slots
+
+
+def update_email_delivery_status(appointment_id, field, status):
+    # Записываем исход уведомления, чтобы владелец видел сбой доставки.
+    updated = supabase_request(
+        "PATCH",
+        supabase_query("appointments", {"id": f"eq.{appointment_id}"}),
+        {field: status},
+    )
+    if not updated:
+        raise BookingServiceError("Appointment email status was not updated.")
+
+
+def send_and_record_email(appointment_id, field, recipient, subject, text):
+    # Письмо и его статус обрабатываются отдельно от сохранения самой записи.
+    try:
+        send_email(recipient, subject, text)
+    except EmailDeliveryError:
+        app.logger.exception("Appointment notification could not be sent.")
+        try:
+            update_email_delivery_status(appointment_id, field, "failed")
+        except BookingServiceError:
+            app.logger.exception("Could not save failed email status.")
+        return False
+
+    try:
+        update_email_delivery_status(appointment_id, field, "sent")
+    except BookingServiceError:
+        app.logger.exception("Email was accepted, but its delivery status was not saved.")
+        return False
+    return True
+
+
+def appointment_email_text(appointment, event):
+    # Создаём простое текстовое письмо для клиента без HTML-шаблонов.
+    start = datetime.fromisoformat(appointment["starts_at"].replace("Z", "+00:00"))
+    local_start = start.astimezone(BUSINESS_TIME_ZONE)
+    local_end = local_start + timedelta(minutes=MEETING_MINUTES)
+    event_copy = {
+        "request": "Мы получили твою заявку. Барсук подтвердит встречу отдельно.",
+        "confirmed": "Барсук подтвердил встречу.",
+        "cancelled": "Встреча отменена. Выбери другое свободное время на сайте.",
+    }[event]
+    return (
+        f"Привет, {appointment['name']}!\n\n"
+        f"{event_copy}\n"
+        f"Дата: {local_start.strftime('%d.%m.%Y')}\n"
+        f"Время: {local_start.strftime('%H:%M')}–{local_end.strftime('%H:%M')} (Europe/Moscow)\n"
+        f"Телефон Барсука: +71488\n"
+    )
+
+
+def notify_new_appointment(appointment):
+    # Каждое уведомление имеет собственный статус: ошибка одного не скрывает другое.
+    appointment_id = appointment["id"]
+    client_sent = send_and_record_email(
+        appointment_id,
+        "client_email_status",
+        appointment["email"],
+        "Заявка на встречу отправлена",
+        appointment_email_text(appointment, "request"),
+    )
+    owner_email = os.environ.get("OWNER_EMAIL", "")
+    owner_text = (
+        f"Новая заявка от {appointment['name']}.\n"
+        f"Телефон: {appointment['phone']}\n"
+        f"Почта: {appointment['email']}\n"
+        f"{appointment_email_text(appointment, 'request')}"
+        f"Комментарий: {appointment.get('note') or 'не указан'}"
+    )
+    owner_sent = send_and_record_email(
+        appointment_id,
+        "owner_email_status",
+        owner_email,
+        "Новая заявка на встречу",
+        owner_text,
+    )
+    return client_sent, owner_sent
+
+
+def notify_appointment_status(appointment, event):
+    # Клиент получает письмо после того, как новый статус уже записан в базе.
+    subject = {
+        "confirmed": "Встреча с Барсуком подтверждена",
+        "cancelled": "Встреча с Барсуком отменена",
+    }[event]
+    return send_and_record_email(
+        appointment["id"],
+        "client_email_status",
+        appointment.get("email", ""),
+        subject,
+        appointment_email_text(appointment, event),
+    )
+
+
+def owner_only():
+    # Все действия со списком и личными данными требуют входа владельца.
+    if not session.get("owner_authenticated"):
+        return redirect(url_for("owner_login"))
+    return None
+
+
+def format_appointment(appointment):
+    # Владелец видит время в часовом поясе расписания, а не в UTC базы.
+    start = datetime.fromisoformat(appointment["starts_at"].replace("Z", "+00:00"))
+    local_start = start.astimezone(BUSINESS_TIME_ZONE)
+    appointment["starts_at_display"] = local_start.strftime("%d.%m.%Y, %H:%M")
+    appointment["ends_at_display"] = (
+        datetime.fromisoformat(appointment["ends_at"].replace("Z", "+00:00"))
+        .astimezone(BUSINESS_TIME_ZONE)
+        .strftime("%H:%M")
+    )
+    appointment["status_label"] = {
+        "pending": "Ожидает подтверждения",
+        "confirmed": "Подтверждена",
+        "cancelled": "Отменена",
+    }.get(appointment["status"], appointment["status"])
+    for field in ("client_email_status", "owner_email_status"):
+        appointment[f"{field}_label"] = {
+            "pending": "Отправляется",
+            "sent": "Отправлено",
+            "failed": "Ошибка отправки",
+            "not_sent": "Не отправлялось",
+        }.get(appointment.get(field), "Неизвестно")
+    return appointment
 
 
 def check_login_limit(client_ip, now=None):
@@ -117,7 +383,29 @@ def check_login_limit(client_ip, now=None):
 @app.get("/")
 def home():
     # Публичная страница содержит форму, но не показывает список заявок.
-    return render_template("index.html")
+    today = datetime.now(BUSINESS_TIME_ZONE).date()
+    return render_template(
+        "index.html",
+        booking_min_date=today.isoformat(),
+        booking_max_date=(today + timedelta(days=BOOKING_DAYS_AHEAD)).isoformat(),
+    )
+
+
+@app.get("/api/availability")
+def availability():
+    # Браузер получает только свободные начала встреч на выбранную дату.
+    try:
+        selected_day = date.fromisoformat(request.args.get("date", ""))
+    except ValueError:
+        return jsonify({"error": "Выбери корректную дату."}), 400
+
+    try:
+        slots = available_slots(selected_day)
+    except BookingServiceError:
+        app.logger.exception("Could not load appointment availability.")
+        return jsonify({"error": "Не удалось загрузить свободное время. Попробуй позже."}), 503
+
+    return jsonify({"slots": slots})
 
 
 @app.post("/booking")
@@ -126,9 +414,8 @@ def create_booking():
     require_csrf_token()
     name = request.form.get("name", "").strip()
     phone = request.form.get("phone", "").strip()
-    requested_at_text = request.form.get("requested_at", "").strip()
-    time_zone = request.form.get("time_zone", "").strip()
-    browser_offset_text = request.form.get("time_zone_offset", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    starts_at_text = request.form.get("starts_at", "").strip()
     note = request.form.get("note", "").strip()
 
     # Проверяем введённые данные на сервере: проверкам браузера доверять нельзя.
@@ -139,53 +426,58 @@ def create_booking():
     if not 7 <= len(phone_digits) <= 15 or not re.fullmatch(r"[+\d\s().-]{7,25}", phone):
         flash("Проверь номер телефона: нужно от 7 до 15 цифр.", "error")
         return redirect(url_for("home", _anchor="booking"))
+    if len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        flash("Укажи корректный адрес электронной почты.", "error")
+        return redirect(url_for("home", _anchor="booking"))
     if len(note) > 1000:
         flash("Комментарий не должен быть длиннее 1000 символов.", "error")
-        return redirect(url_for("home", _anchor="booking"))
-    if not re.fullmatch(r"[A-Za-z0-9_+./-]{1,100}", time_zone):
-        flash("Не удалось определить твой часовой пояс. Обнови страницу и попробуй ещё раз.", "error")
-        return redirect(url_for("home", _anchor="booking"))
-    try:
-        # JavaScript reports UTC-minus-local; invert it to get the local UTC offset.
-        time_zone_offset = -int(browser_offset_text)
-    except ValueError:
-        flash("Не удалось определить смещение часового пояса. Обнови страницу и попробуй ещё раз.", "error")
-        return redirect(url_for("home", _anchor="booking"))
-    if not -840 <= time_zone_offset <= 840:
-        flash("Указан некорректный часовой пояс.", "error")
         return redirect(url_for("home", _anchor="booking"))
     if request.form.get("consent") != "yes":
         flash("Подтверди, что данные нужны для связи по поводу встречи.", "error")
         return redirect(url_for("home", _anchor="booking"))
 
-    # datetime-local не содержит часовой пояс, поэтому сохраняем время и зону браузера отдельно.
+    # Клиент может изменить поля формы, поэтому слот сверяется с серверным расписанием.
     try:
-        requested_at = datetime.strptime(requested_at_text, "%Y-%m-%dT%H:%M")
+        starts_at = datetime.fromisoformat(starts_at_text)
+        if starts_at.tzinfo is None:
+            raise ValueError("Slot timestamp must include its timezone.")
+        starts_at_utc = starts_at.astimezone(timezone.utc)
+        local_start = starts_at_utc.astimezone(BUSINESS_TIME_ZONE)
+        slots = available_slots(local_start.date())
+        if starts_at_utc.isoformat() not in {slot["value"] for slot in slots}:
+            flash("Это время уже занято или недоступно. Выбери другое.", "error")
+            return redirect(url_for("home", _anchor="booking"))
     except ValueError:
-        flash("Выбери корректные дату и время встречи.", "error")
+        flash("Выбери свободное время из списка.", "error")
         return redirect(url_for("home", _anchor="booking"))
-    requested_at_utc = requested_at.replace(
-        tzinfo=timezone(timedelta(minutes=time_zone_offset))
-    ).astimezone(timezone.utc)
-    if requested_at_utc <= datetime.now(timezone.utc):
-        flash("Выбери дату и время в будущем.", "error")
+    except BookingServiceError:
+        app.logger.exception("Could not verify the selected appointment slot.")
+        flash("Не удалось проверить свободное время. Попробуй позже.", "error")
         return redirect(url_for("home", _anchor="booking"))
 
     try:
-        # Сохраняем только данные, нужные для связи и согласования встречи.
+        # Ограничение в базе атомарно запрещает одновременную бронь пересекающихся слотов.
         saved = supabase_request(
             "POST",
             "appointments",
             {
                 "name": name,
                 "phone": phone,
-                "requested_at": requested_at.isoformat(),
-                "time_zone": time_zone,
-                "time_zone_offset": time_zone_offset,
+                "email": email,
+                "requested_at": local_start.replace(tzinfo=None).isoformat(),
+                "time_zone": "Europe/Moscow",
+                "time_zone_offset": int(local_start.utcoffset().total_seconds() // 60),
+                "starts_at": starts_at_utc.isoformat(),
+                "ends_at": (starts_at_utc + timedelta(minutes=MEETING_MINUTES)).isoformat(),
                 "note": note or None,
                 "status": "pending",
+                "client_email_status": "pending",
+                "owner_email_status": "pending",
             },
         )
+    except SlotUnavailableError:
+        flash("Кто-то только что занял это время. Выбери другой свободный слот.", "error")
+        return redirect(url_for("home", _anchor="booking"))
     except BookingServiceError:
         # Лучше сообщить об ошибке, чем ложно подтвердить несохранённую запись.
         flash("Не получилось сохранить заявку. Попробуй позже или свяжись с Барсуком по телефону.", "error")
@@ -196,7 +488,14 @@ def create_booking():
         app.logger.error("Supabase accepted a booking without returning its row.")
         flash("Не удалось подтвердить сохранение. Свяжись с Барсуком.", "error")
     else:
-        flash("Заявка отправлена! Барсук свяжется с тобой для подтверждения времени.", "success")
+        client_email_sent, owner_email_sent = notify_new_appointment(saved[0])
+        flash("Заявка отправлена! Барсук свяжется с тобой для подтверждения встречи.", "success")
+        if not client_email_sent or not owner_email_sent:
+            flash(
+                "Заявка сохранена, но одно из писем не отправилось. "
+                "Барсук увидит статус доставки в кабинете.",
+                "error",
+            )
     return redirect(url_for("home", _anchor="booking"))
 
 
@@ -230,24 +529,155 @@ def owner_login():
 @app.get("/owner/appointments")
 def owner_appointments():
     # Личные данные клиентов видны только после входа владельца.
-    if not session.get("owner_authenticated"):
-        return redirect(url_for("owner_login"))
+    auth_redirect = owner_only()
+    if auth_redirect:
+        return auth_redirect
 
-    query = urlencode(
+    query = supabase_query(
+        "appointments",
         {
-            "select": "id,name,phone,requested_at,time_zone,time_zone_offset,note,status,created_at",
+            "select": "id,name,phone,email,starts_at,ends_at,note,status,client_email_status,owner_email_status,created_at",
             "order": "created_at.desc",
             "limit": "100",
         },
-        quote_via=quote,
     )
     try:
         # Показываем владельцу последние 100 заявок, а не всю таблицу без ограничений.
-        appointments = supabase_request("GET", f"appointments?{query}")
+        appointments = supabase_request("GET", query)
     except BookingServiceError:
         abort(503, description="Не удалось загрузить записи. Проверь настройки Supabase.")
 
+    appointments = [format_appointment(appointment) for appointment in appointments]
     return render_template("owner_appointments.html", appointments=appointments)
+
+
+def change_appointment_status(appointment_id, new_status, allowed_statuses):
+    # Меняем статус в базе до письма; отменённый слот сразу становится свободным.
+    auth_redirect = owner_only()
+    if auth_redirect:
+        return auth_redirect
+    require_csrf_token()
+    query = supabase_query(
+        "appointments",
+        {
+            "id": f"eq.{appointment_id}",
+            "status": f"in.({','.join(allowed_statuses)})",
+            "select": "id,name,phone,email,starts_at,ends_at,note,status",
+        },
+    )
+    try:
+        rows = supabase_request(
+            "PATCH",
+            query,
+            {"status": new_status, "client_email_status": "pending"},
+        )
+    except BookingServiceError:
+        abort(503, description="Не удалось обновить запись. Попробуй ещё раз.")
+    if not rows:
+        flash("Запись уже изменилась или была удалена. Обнови список.", "error")
+        return redirect(url_for("owner_appointments"))
+
+    appointment = rows[0]
+    email_sent = notify_appointment_status(appointment, new_status)
+    if email_sent:
+        flash("Статус записи обновлён, письмо клиенту отправлено.", "success")
+    else:
+        flash(
+            "Статус записи обновлён, но письмо клиенту не отправилось. "
+            "Проверь Resend и повтори отправку из карточки записи.",
+            "error",
+        )
+    return redirect(url_for("owner_appointments"))
+
+
+@app.post("/owner/appointments/<int:appointment_id>/confirm")
+def confirm_appointment(appointment_id):
+    # Подтверждение оставляет слот занятым и отправляет клиенту письмо.
+    return change_appointment_status(appointment_id, "confirmed", ["pending"])
+
+
+@app.post("/owner/appointments/<int:appointment_id>/cancel")
+def cancel_appointment(appointment_id):
+    # Отмена освобождает время и сообщает клиенту об отмене.
+    return change_appointment_status(appointment_id, "cancelled", ["pending", "confirmed"])
+
+
+@app.post("/owner/appointments/<int:appointment_id>/delete")
+def delete_appointment(appointment_id):
+    # Удаление стирает персональные данные и освобождает время без письма клиенту.
+    auth_redirect = owner_only()
+    if auth_redirect:
+        return auth_redirect
+    require_csrf_token()
+    try:
+        deleted = supabase_request(
+            "DELETE",
+            supabase_query("appointments", {"id": f"eq.{appointment_id}", "select": "id"}),
+        )
+    except BookingServiceError:
+        abort(503, description="Не удалось удалить запись. Попробуй ещё раз.")
+    if not deleted:
+        flash("Эта запись уже удалена.", "error")
+    else:
+        flash("Запись удалена, время снова свободно.", "success")
+    return redirect(url_for("owner_appointments"))
+
+
+@app.post("/owner/appointments/<int:appointment_id>/retry-email")
+def retry_appointment_email(appointment_id):
+    # Владелец может повторить уведомления после настройки или сбоя почты.
+    auth_redirect = owner_only()
+    if auth_redirect:
+        return auth_redirect
+    require_csrf_token()
+    try:
+        rows = supabase_request(
+            "GET",
+            supabase_query(
+                "appointments",
+                {
+                    "id": f"eq.{appointment_id}",
+                    "select": "id,name,phone,email,starts_at,ends_at,note,status,client_email_status,owner_email_status",
+                },
+            ),
+        )
+    except BookingServiceError:
+        abort(503, description="Не удалось загрузить запись. Попробуй ещё раз.")
+    if not rows:
+        flash("Эта запись уже удалена.", "error")
+        return redirect(url_for("owner_appointments"))
+
+    appointment = rows[0]
+    event = appointment["status"] if appointment["status"] != "pending" else "request"
+    retry_results = []
+    if appointment["client_email_status"] in ("failed", "pending"):
+        retry_results.append(
+            send_and_record_email(
+                appointment_id,
+                "client_email_status",
+                appointment.get("email", ""),
+                "Заявка на встречу",
+                appointment_email_text(appointment, event),
+            )
+        )
+    if appointment["owner_email_status"] in ("failed", "pending"):
+        retry_results.append(
+            send_and_record_email(
+                appointment_id,
+                "owner_email_status",
+                os.environ.get("OWNER_EMAIL", ""),
+                "Обновление заявки на встречу",
+                f"Заявка №{appointment_id}: {appointment['name']}, "
+                f"{appointment['email']}, статус: {appointment['status']}.",
+            )
+        )
+    if retry_results and all(retry_results):
+        flash("Неотправленные письма отправлены.", "success")
+    elif retry_results:
+        flash("Не все письма удалось отправить. Проверь настройки Resend.", "error")
+    else:
+        flash("Для этой записи нет писем с ошибкой отправки.", "success")
+    return redirect(url_for("owner_appointments"))
 
 
 @app.post("/owner/logout")
